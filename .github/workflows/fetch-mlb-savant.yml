@@ -1,33 +1,54 @@
-name: Fetch MLB Savant Data
-on:
-  schedule:
-    - cron: "0 14 * * *"    # every day 8:00 AM MDT (14:00 UTC)
-  workflow_dispatch: {}      # manual trigger
+# Fetch recent Statcast data (all players), then derive pitcher features.
+# Works with current pybaseball where statcast_pitcher() requires player_id.
 
-jobs:
-  fetch:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+from datetime import date, timedelta
+import os
+import pandas as pd
+from pybaseball import statcast  # <-- NOTE: use statcast(), not statcast_pitcher()
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+DAYS = int(os.getenv("DAYS", "7"))             # lookback window
+OUT_DIR = os.getenv("OUT_DIR", "data/mlb_savant")
 
-      - name: Install dependencies
-        run: |
-          pip install pybaseball pandas
+def main():
+    start = (date.today() - timedelta(days=DAYS)).strftime("%Y-%m-%d")
+    end = date.today().strftime("%Y-%m-%d")
+    print(f"Fetching Statcast data from {start} to {end}")
 
-      - name: Run MLB Savant fetch script
-        run: python scripts/fetch_mlb_savant.py
+    # Pull ALL batted ball / pitch events in the window
+    df = statcast(start_dt=start, end_dt=end)   # returns pitch-by-pitch events
 
-      - name: Commit & push CSV
-        run: |
-          git config user.name "gh-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add data/mlb_savant/*.csv
-          git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
-          git push
+    if df is None or len(df) == 0:
+        raise SystemExit("No data returned from statcast(). Try widening the date window.")
+
+    # Save the raw pull
+    os.makedirs(OUT_DIR, exist_ok=True)
+    raw_path = f"{OUT_DIR}/statcast_{start}_to_{end}.csv"
+    df.to_csv(raw_path, index=False)
+    print(f"✅ Raw saved -> {raw_path} ({len(df)} rows)")
+
+    # Keep core columns (existence varies by row; guard with .get)
+    keep_cols = [
+        "pitcher","player_name","game_date",
+        "release_speed","launch_speed","launch_angle",
+        "events","description","home_team","away_team"
+    ]
+    df_trim = df[[c for c in keep_cols if c in df.columns]].copy()
+    trim_path = f"{OUT_DIR}/latest_pitch_data.csv"
+    df_trim.to_csv(trim_path, index=False)
+    print(f"✅ Trim saved -> {trim_path} ({len(df_trim)} rows)")
+
+    # Simple pitcher quality rollups
+    if {"pitcher","launch_speed","launch_angle"}.issubset(df_trim.columns):
+        df_trim["barrel_flag"] = ((df_trim["launch_speed"] >= 98) &
+                                  (df_trim["launch_angle"].between(26, 30))).astype(int)
+        df_trim["hard_hit"] = (df_trim["launch_speed"] >= 95).astype(int)
+        agg = (df_trim.groupby("pitcher")[["barrel_flag","hard_hit"]]
+               .mean()
+               .rename(columns={"barrel_flag":"barrel_rate","hard_hit":"hard_hit_rate"})
+               .reset_index())
+        agg_path = f"{OUT_DIR}/pitcher_quality.csv"
+        agg.to_csv(agg_path, index=False)
+        print(f"✅ Aggregates -> {agg_path} ({len(agg)} pitchers)")
+
+if __name__ == "__main__":
+    main()
