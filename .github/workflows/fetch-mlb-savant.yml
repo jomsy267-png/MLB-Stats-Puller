@@ -1,0 +1,33 @@
+name: Fetch MLB Savant Data
+on:
+  schedule:
+    - cron: "0 14 * * *"    # every day 8:00 AM MDT (14:00 UTC)
+  workflow_dispatch: {}      # manual trigger
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pybaseball pandas
+
+      - name: Run MLB Savant fetch script
+        run: python scripts/fetch_mlb_savant.py
+
+      - name: Commit & push CSV
+        run: |
+          git config user.name "gh-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/mlb_savant/*.csv
+          git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
+          git push
