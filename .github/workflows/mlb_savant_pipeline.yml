@@ -1,0 +1,77 @@
+name: MLB Savant + Odds Pipeline
+on:
+  schedule:
+    - cron: "0 14 * * *"    # 08:00 America/Edmonton (UTC-06 in winter/MDT adjust as needed)
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install pybaseball>=2.2.8 pandas; fi
+
+      # --- Fetch Savant data (no keys needed) ---
+      - name: Fetch MLB Savant
+        env:
+          DAYS: "7"    # change to 3 if you want lighter payloads
+        run: |
+          python scripts/fetch_mlb_savant.py
+
+      # --- Fetch odds via aggregator API (skip if you aren't using an API) ---
+      - name: Fetch Odds via API
+        if: ${{ env.ODDS_API_KEY != '' }}
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python - << 'PY'
+          import os, time, requests, pandas as pd
+          k = os.environ.get("ODDS_API_KEY")
+          if not k:
+              raise SystemExit("No ODDS_API_KEY provided. Add it in repo Secrets.")
+          url = ("https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
+                 "?regions=us,ca&markets=h2h,spreads,totals&oddsFormat=american"
+                 "&bookmakers=draftkings,betmgm,caesars,bet365,bet99,coolbet"
+                 f"&apiKey={k}")
+          r = requests.get(url, timeout=45); r.raise_for_status()
+          data = r.json()
+          df = pd.json_normalize(
+              data,
+              record_path=['bookmakers','markets','outcomes'],
+              meta=['id','commence_time','home_team','away_team',
+                    ['bookmakers','key'], ['bookmakers','title'], ['bookmakers','markets','key']]
+          ).rename(columns={
+              'bookmakers.key':'book_key','bookmakers.title':'book','bookmakers.markets.key':'market'
+          })
+          os.makedirs("data/odds_api", exist_ok=True)
+          path = f"data/odds_api/{int(time.time())}.csv"
+          df.to_csv(path, index=False); print("saved ->", path)
+          PY
+
+      - name: Normalize odds
+        run: |
+          python scripts/normalize_odds.py
+
+      - name: Merge odds + Savant features
+        run: |
+          python scripts/merge_savant_odds.py
+
+      - name: Commit outputs
+        run: |
+          git config user.name "gh-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/mlb_savant/*.csv data/odds_api/*.csv data/model_inputs/*.csv || true
+          git commit -m "MLB Savant + Odds update $(date -u +%FT%TZ)" || echo "No changes"
+          git push || true
