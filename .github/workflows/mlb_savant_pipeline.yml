@@ -1,14 +1,14 @@
 name: MLB Savant + Odds Pipeline (PR Flow)
 
 on:
-  schedule:
-    - cron: "0 14 * * *"   # 8:00 AM America/Edmonton
   workflow_dispatch: {}
+  # You can also add a schedule here if you want this to run independently:
+  # schedule:
+  #   - cron: "30 14 * * *"
 
 jobs:
   build-dataset:
     runs-on: ubuntu-latest
-    # These allow creating a branch and PR with GITHUB_TOKEN
     permissions:
       contents: write
       pull-requests: write
@@ -33,7 +33,7 @@ jobs:
         run: |
           pip install "pybaseball==2.2.7" pandas requests
 
-      - name: Fetch MLB Savant data
+      - name: Fetch MLB Savant (ensures fresh local files for merge)
         env:
           DAYS: ${{ env.DAYS }}
         run: python scripts/fetch_mlb_savant.py
@@ -41,6 +41,7 @@ jobs:
       # Detect if ODDS_API_KEY exists (so we can conditionally run odds steps)
       - name: Check if ODDS_API_KEY exists
         id: check_key
+        shell: bash
         run: |
           if [ -n "${{ secrets.ODDS_API_KEY }}" ]; then
             echo "has_key=true" >> $GITHUB_OUTPUT
@@ -48,7 +49,7 @@ jobs:
             echo "has_key=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Fetch odds via API
+      - name: Fetch odds via API (optional)
         if: steps.check_key.outputs.has_key == 'true'
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
@@ -60,7 +61,7 @@ jobs:
                "?regions=us,ca&markets=h2h,spreads,totals&oddsFormat=american"
                "&bookmakers=draftkings,betmgm,caesars,bet365,bet99,coolbet"
                f"&apiKey={k}")
-          r=requests.get(url,timeout=45); r.raise_for_status()
+          r=requests.get(url,timeout=60); r.raise_for_status()
           data=r.json()
           df=pd.json_normalize(
               data,
@@ -81,7 +82,7 @@ jobs:
         if: steps.check_key.outputs.has_key == 'true'
         run: python scripts/merge_savant_odds.py
 
-      # Create a short-lived branch and commit outputs
+      # Create a short-lived branch, commit outputs, open PR
       - name: Create data update branch
         run: |
           BRANCH="mlb-savant-data-${GITHUB_RUN_ID}"
@@ -95,27 +96,25 @@ jobs:
           git commit -m "Automated MLB data update $(date -u +%FT%TZ)" || echo "No changes"
           git push -u origin "$BRANCH"
 
-      # (Nice to have) also upload artifacts so you can download CSVs from the run page
-      - name: Upload CSVs as artifact
+      - name: Upload all CSVs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mlb-data-${{ github.run_id }}
+          name: mlb-pipeline-${{ github.run_id }}
           path: |
             data/mlb_savant/**/*.csv
             data/odds_api/**/*.csv
             data/model_inputs/**/*.csv
           if-no-files-found: warn
 
-      # Open PR (no PAT required)
       - name: Open Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           title: "Automated MLB data update"
           body: |
-            This PR was generated automatically.
+            Generated automatically.
             - Statcast window: last ${{ env.DAYS }} days
-            ${{ steps.check_key.outputs.has_key == 'true' && '* Includes odds + merged metrics.' || '* Savant data only.' }}
+            ${{ steps.check_key.outputs.has_key == 'true' && '* Includes odds + merged features.' || '* Savant data only.' }}
           base: ${{ github.ref_name }}
           branch: ${{ env.BRANCH }}
           delete-branch: true
