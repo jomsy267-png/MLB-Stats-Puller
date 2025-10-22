@@ -37,7 +37,7 @@ jobs:
           DAYS: ${{ env.DAYS }}
         run: python scripts/fetch_mlb_savant.py
 
-      # Use a job-level environment variable instead of direct secret check
+      # --- Detect if ODDS_API_KEY secret exists ---
       - name: Check if ODDS_API_KEY exists
         id: check_key
         run: |
@@ -80,6 +80,7 @@ jobs:
         if: steps.check_key.outputs.has_key == 'true'
         run: python scripts/merge_savant_odds.py
 
+      # --- Create a data branch and commit outputs ---
       - name: Create data update branch
         run: |
           BRANCH="mlb-savant-data-${GITHUB_RUN_ID}"
@@ -93,6 +94,7 @@ jobs:
           git commit -m "Automated MLB data update $(date -u +%FT%TZ)" || echo "No changes"
           git push -u origin "$BRANCH"
 
+      # --- Open PR (no 'head' param needed) ---
       - name: Open Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
@@ -103,6 +105,5 @@ jobs:
             - Statcast window: last ${{ env.DAYS }} days
             ${{ steps.check_key.outputs.has_key == 'true' && '* Includes odds + merged metrics.' || '* Savant data only.' }}
           base: ${{ github.ref_name }}
-          head: ${{ env.BRANCH }}
           branch: ${{ env.BRANCH }}
           delete-branch: true
