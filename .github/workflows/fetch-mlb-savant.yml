@@ -2,38 +2,30 @@ name: Fetch MLB Savant Data
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # 8:00 AM MDT (14:00 UTC)
+    - cron: "0 14 * * *"
   workflow_dispatch: {}
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    permissions:
+      contents: write   # <<— allow pushing
     steps:
       - name: Checkout repo
-      # v4 is correct for actions/checkout
         uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          fetch-depth: 0
+          persist-credentials: true   # uses GITHUB_TOKEN
 
-      - name: Install dependencies
-        run: |
-          pip install "pybaseball==2.2.7" pandas
-
-      - name: Fetch latest Statcast (last 7 days)
-        env:
-          DAYS: "7"
-        run: |
-          python scripts/fetch_mlb_savant.py
+      # ... your install + fetch steps ...
 
       - name: Commit & push CSVs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "gh-bot"
-          git config user.email "actions@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/mlb_savant/*.csv || true
           git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
-          git push || true
+          # Push back to the same branch the workflow runs on:
+          git push origin HEAD:${{ github.ref_name }}
