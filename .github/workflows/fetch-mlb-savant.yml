@@ -2,7 +2,7 @@ name: Fetch MLB Savant Data
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # 8:00 AM America/Edmonton
+    - cron: "0 14 * * *"   # 8:00 AM America/Edmonton (14:00 UTC)
   workflow_dispatch: {}
 
 jobs:
@@ -33,21 +33,38 @@ jobs:
           DAYS: "7"
         run: python scripts/fetch_mlb_savant.py
 
-      - name: Commit & push CSVs
+      - name: Commit CSVs if changed
+        id: commit_data
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/mlb_savant/*.csv || true
-          git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
-          git push origin HEAD:${{ github.ref_name }} || true
+          git add data/mlb_savant/*.csv 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes to commit."
+          else
+            git commit -m "Update MLB Savant data $(date -u +%FT%TZ)"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
 
-      # 👇 Auto-trigger full pipeline
+      # Optional: attach CSVs as artifact for easy download
+      - name: Upload CSVs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-savant-${{ github.run_id }}
+          path: |
+            data/mlb_savant/**/*.csv
+          if-no-files-found: warn
+
+      # Auto-trigger full pipeline ONLY when there were actual changes
       - name: Trigger full pipeline
-        if: success()
+        if: steps.commit_data.outputs.changed == 'true'
         uses: benc-uk/workflow-dispatch@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: mlb_savant_pipeline.yml
+          token: ${{ secrets.DISPATCH_TOKEN }}     # <-- your PAT secret
+          repository: ${{ github.repository }}
+          workflow: mlb_savant_pipeline.yml       # must match the filename below
           ref: main
