@@ -1,6 +1,3 @@
-# scripts/fetch_mlb_savant.py
-# Robust to NaNs; works with pybaseball==2.2.7
-
 from datetime import date, timedelta
 import os
 import pandas as pd
@@ -29,30 +26,27 @@ def main():
     ]
     df_trim = df[[c for c in keep if c in df.columns]].copy()
 
-    # ---- Make sure numeric cols are numeric and allow NaNs ----
+    # numeric coercion (avoid NA->int cast failures)
     for c in ("launch_speed", "launch_angle", "release_speed"):
         if c in df_trim.columns:
             df_trim[c] = pd.to_numeric(df_trim[c], errors="coerce")
 
-    # ---- Flags (NA-safe) ----
+    # flags
     if {"launch_speed","launch_angle"}.issubset(df_trim.columns):
         barrel_bool = (df_trim["launch_speed"].ge(98) &
                        df_trim["launch_angle"].between(26, 30)).fillna(False)
         hard_bool = df_trim["launch_speed"].ge(95).fillna(False)
-
-        # use pandas nullable Int64 to avoid NA->int errors, then convert to plain int
         df_trim["barrel_flag"] = barrel_bool.astype("Int64").fillna(0).astype(int)
         df_trim["hard_hit"]    = hard_bool.astype("Int64").fillna(0).astype(int)
     else:
         df_trim["barrel_flag"] = 0
         df_trim["hard_hit"] = 0
 
-    # ---- Save trimmed ----
     trim_path = f"{OUT_DIR}/latest_pitch_data.csv"
     df_trim.to_csv(trim_path, index=False)
     print(f"✅ Trim saved -> {trim_path} ({len(df_trim)} rows)")
 
-    # ---- Per-pitcher aggregates ----
+    # per-pitcher aggregates
     if "pitcher" in df_trim.columns:
         agg = (df_trim.groupby("pitcher")[["barrel_flag","hard_hit"]]
                .mean()
@@ -61,7 +55,7 @@ def main():
         agg.to_csv(f"{OUT_DIR}/pitcher_quality.csv", index=False)
         print(f"✅ Pitcher aggregates -> {OUT_DIR}/pitcher_quality.csv ({len(agg)} pitchers)")
 
-    # ---- Team batting/pitching (uses inning_topbot to decide sides) ----
+    # team batting/pitching
     def batting_team(row):
         return row.get("away_team") if row.get("inning_topbot") == "Top" else row.get("home_team")
     def pitching_team(row):
@@ -70,8 +64,8 @@ def main():
     if {"home_team","away_team","inning_topbot"}.issubset(df_trim.columns):
         df_trim["bat_team"] = df_trim.apply(batting_team, axis=1)
         df_trim["pitch_team"] = df_trim.apply(pitching_team, axis=1)
-
         bat_cols = ["barrel_flag","hard_hit"]
+
         team_bat = (df_trim.groupby("bat_team")[bat_cols]
                     .mean()
                     .rename(columns={"barrel_flag":"bat_barrel_rate",
