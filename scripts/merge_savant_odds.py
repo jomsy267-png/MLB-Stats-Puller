@@ -14,8 +14,10 @@ TEAM_MAP = {
  "Miami Marlins":"MIA","Washington Nationals":"WSH","Chicago Cubs":"CHC",
  "St. Louis Cardinals":"STL","Milwaukee Brewers":"MIL","Cincinnati Reds":"CIN",
  "Pittsburgh Pirates":"PIT","Los Angeles Dodgers":"LAD","San Francisco Giants":"SF",
- "San Diego Padres":"SD","Arizona Diamondbacks":"ARI","Colorado Rockies":"COL"
+ "San Diego Padres":"SD","Arizona Diamondbacks":"ARI","Colorado Rockies":"COLO","Colorado Rockies":"COL"
 }
+TEAM_MAP["Colorado Rockies"] = "COL"  # ensure correct key
+
 odds["home_abbr"] = odds["home_team"].map(TEAM_MAP).fillna(odds["home_team"])
 odds["away_abbr"] = odds["away_team"].map(TEAM_MAP).fillna(odds["away_team"])
 
