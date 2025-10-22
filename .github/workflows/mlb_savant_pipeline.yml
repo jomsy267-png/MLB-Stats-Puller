@@ -1,17 +1,20 @@
 name: MLB Savant + Odds Pipeline (PR Flow)
 
 on:
+  workflow_run:
+    workflows: ["Fetch MLB Savant Data"]   # <-- exact name from the first file
+    types: [completed]
   workflow_dispatch: {}
-  # You can also add a schedule here if you want this to run independently:
-  # schedule:
-  #   - cron: "30 14 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   build-dataset:
+    # only run when the upstream workflow succeeded, or when manually dispatched
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     timeout-minutes: 30
 
     env:
@@ -33,12 +36,11 @@ jobs:
         run: |
           pip install "pybaseball==2.2.7" pandas requests
 
-      - name: Fetch MLB Savant (ensures fresh local files for merge)
+      - name: Fetch MLB Savant (freshen local files)
         env:
           DAYS: ${{ env.DAYS }}
         run: python scripts/fetch_mlb_savant.py
 
-      # Detect if ODDS_API_KEY exists (so we can conditionally run odds steps)
       - name: Check if ODDS_API_KEY exists
         id: check_key
         shell: bash
@@ -78,11 +80,10 @@ jobs:
         if: steps.check_key.outputs.has_key == 'true'
         run: python scripts/normalize_odds.py
 
-      - name: Merge odds + Savant features
+      - name: Merge odds + Savant
         if: steps.check_key.outputs.has_key == 'true'
         run: python scripts/merge_savant_odds.py
 
-      # Create a short-lived branch, commit outputs, open PR
       - name: Create data update branch
         run: |
           BRANCH="mlb-savant-data-${GITHUB_RUN_ID}"
