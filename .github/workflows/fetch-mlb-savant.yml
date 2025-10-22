@@ -2,17 +2,15 @@ name: Fetch MLB Savant Data
 
 on:
   schedule:
-    - cron: "15 16 * * *"  # runs daily at 10:15 AM America/Edmonton
+    - cron: "15 16 * * *"  # 10:15 AM America/Edmonton
   workflow_dispatch: {}
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -53,13 +51,3 @@ jobs:
         with:
           name: mlb-savant-${{ github.run_id }}
           path: data/mlb_savant/**/*.csv
-
-      # ✅ Always trigger full pipeline after successful run
-      - name: Trigger Full MLB Pipeline
-        if: success()
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          repository: ${{ github.repository }}
-          workflow: mlb_savant_pipeline.yml
-          ref: main
