@@ -2,12 +2,13 @@ name: MLB Savant + Odds Pipeline (PR Flow)
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # 8:00 AM MDT
+    - cron: "0 14 * * *"   # 8:00 AM America/Edmonton
   workflow_dispatch: {}
 
 jobs:
   build-dataset:
     runs-on: ubuntu-latest
+    # These allow creating a branch and PR with GITHUB_TOKEN
     permissions:
       contents: write
       pull-requests: write
@@ -37,7 +38,7 @@ jobs:
           DAYS: ${{ env.DAYS }}
         run: python scripts/fetch_mlb_savant.py
 
-      # --- Detect if ODDS_API_KEY secret exists ---
+      # Detect if ODDS_API_KEY exists (so we can conditionally run odds steps)
       - name: Check if ODDS_API_KEY exists
         id: check_key
         run: |
@@ -80,7 +81,7 @@ jobs:
         if: steps.check_key.outputs.has_key == 'true'
         run: python scripts/merge_savant_odds.py
 
-      # --- Create a data branch and commit outputs ---
+      # Create a short-lived branch and commit outputs
       - name: Create data update branch
         run: |
           BRANCH="mlb-savant-data-${GITHUB_RUN_ID}"
@@ -94,7 +95,18 @@ jobs:
           git commit -m "Automated MLB data update $(date -u +%FT%TZ)" || echo "No changes"
           git push -u origin "$BRANCH"
 
-      # --- Open PR (no 'head' param needed) ---
+      # (Nice to have) also upload artifacts so you can download CSVs from the run page
+      - name: Upload CSVs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-data-${{ github.run_id }}
+          path: |
+            data/mlb_savant/**/*.csv
+            data/odds_api/**/*.csv
+            data/model_inputs/**/*.csv
+          if-no-files-found: warn
+
+      # Open PR (no PAT required)
       - name: Open Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
