@@ -43,12 +43,11 @@ jobs:
           git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
           git push origin HEAD:${{ github.ref_name }} || true
 
-      # 👇 Auto-trigger full pipeline after this completes
+      # 👇 Auto-trigger full pipeline
       - name: Trigger full pipeline
         if: success()
-        uses: peter-evans/workflow-dispatch@v2
+        uses: benc-uk/workflow-dispatch@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
           workflow: mlb_savant_pipeline.yml
           ref: main
