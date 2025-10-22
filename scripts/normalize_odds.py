@@ -1,4 +1,4 @@
-import pandas as pd, glob, math, os
+import pandas as pd, glob, os
 
 def money_to_prob(american):
     a = float(american)
