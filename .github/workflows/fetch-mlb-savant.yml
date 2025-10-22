@@ -9,23 +9,45 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # <<— allow pushing
+      contents: write        # commit to new branch
+      pull-requests: write   # create PR
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true   # uses GITHUB_TOKEN
 
-      # ... your install + fetch steps ...
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Commit & push CSVs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
         run: |
+          pip install "pybaseball==2.2.7" pandas
+
+      - name: Fetch latest Statcast (last 7 days)
+        env:
+          DAYS: "7"
+        run: python scripts/fetch_mlb_savant.py
+
+      - name: Create update branch
+        run: |
+          BRANCH="mlb-savant-data-${GITHUB_RUN_ID}"
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add data/mlb_savant/*.csv || true
           git commit -m "Update MLB Savant data $(date -u +%FT%TZ)" || echo "No changes"
-          # Push back to the same branch the workflow runs on:
-          git push origin HEAD:${{ github.ref_name }}
+          git push -u origin "$BRANCH"
+
+      - name: Open Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "Automated MLB Savant data update"
+          body: "This PR updates MLB Savant CSVs from the scheduled job."
+          base: ${{ github.ref_name }}                   # usually 'main'
+          head: ${{ env.BRANCH }}
+          branch: ${{ env.BRANCH }}                      # for action bookkeeping
